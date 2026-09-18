@@ -1,4 +1,4 @@
-# RelayPilot
+# Pangolin
 
 精简的远程 Codex / Claude 控制器：浏览器通过 HTTPS 给公网 Relay 派任务，内网 Agent 主动建立 WSS 连接，在本机 tmux 中运行 CLI。
 
@@ -18,7 +18,7 @@
 - 创建、列出、发送 prompt、读取最近 200 行输出、停止会话。
 - 设备 heartbeat、断线重连、离线错误及请求超时处理。
 - 本机配置项目及 Agent 白名单；没有任意 shell.exec 接口。
-- 使用独立的 tmux socket `relaypilot`，只管理 `rp-<uuid>` 会话。
+- 使用独立的 tmux socket `pangolin`，只管理 `rp-<uuid>` 会话。
 - 浏览器 token 只留在页面内存；日志以文本展示。
 
 这是单用户、单进程 MVP。所有持有 USER_TOKEN 的客户端可控制全部配置设备。Relay 不持久化任务、日志或设备状态；tmux 会话可在 Agent 重连后重新列出。超时不等于命令未执行，请先刷新状态，勿盲目重试创建或发送操作。
@@ -43,7 +43,7 @@ tests/               鉴权、转发与会话测试
 需要 Python 3.9+、tmux 3.2+。在内网机器安装并登录 `codex` / `claude`，确认对应命令在 PATH 中可用。API key 只在内网机器配置，不传给 Relay。
 
 ```bash
-cd /path/to/RelayPilot
+cd /path/to/Pangolin
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -80,8 +80,8 @@ python -m agent.main
 打开 http://127.0.0.1:8000，输入 USER_TOKEN，选设备，填写项目 `example`，创建会话。需要本机交互时：
 
 ```bash
-tmux -L relaypilot list-sessions
-tmux -L relaypilot attach -t 'rp-替换为实际会话ID'
+tmux -L pangolin list-sessions
+tmux -L pangolin attach -t 'rp-替换为实际会话ID'
 ```
 
 上面 attach 目标应直接替换为列表输出的完整 `rp-...` ID；退出查看但保留会话用 `Ctrl-B D`。停止网页上的会话会终止 CLI 及其正在运行的任务。
@@ -93,9 +93,9 @@ tmux -L relaypilot attach -t 'rp-替换为实际会话ID'
 3. 内网 Agent 设置 `RELAY_WS_URL=wss://你的域名/ws/agent`、DEVICE_ID、DEVICE_TOKEN、AGENT_CONFIG。非 loopback 地址强制 WSS。
 4. 浏览器访问 `https://你的域名`。不要把 token 放在 URL、截图或版本库里。
 
-Linux 示例在 `deploy/`。服务端需先创建专用 `relaypilot` 用户，把项目放到 `/opt/RelayPilot` 并安装虚拟环境，在 `/etc/relaypilot/server.env` 写入两项服务端变量，限制权限为 600。将 server unit 安装到 `/etc/systemd/system/` 后执行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now relaypilot-server`。
+Linux 示例在 `deploy/`。服务端需先创建专用 `pangolin` 用户，把项目放到 `/opt/Pangolin` 并安装虚拟环境，在 `/etc/pangolin/server.env` 写入两项服务端变量，限制权限为 600。将 server unit 安装到 `/etc/systemd/system/` 后执行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now pangolin-server`。
 
-Agent 示例是 user unit：项目位于 `~/RelayPilot`，环境文件位于 `~/.config/relaypilot/agent.env`（权限 600），unit 放入 `~/.config/systemd/user/`。按 CLI 实际安装位置修改 unit 的 PATH，然后运行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now relaypilot-agent`。需要退出登录后运行时由管理员配置 linger。macOS 本地运行无需 systemd。
+Agent 示例是 user unit：项目位于 `~/Pangolin`，环境文件位于 `~/.config/pangolin/agent.env`（权限 600），unit 放入 `~/.config/systemd/user/`。按 CLI 实际安装位置修改 unit 的 PATH，然后运行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now pangolin-agent`。需要退出登录后运行时由管理员配置 linger。macOS 本地运行无需 systemd。
 
 模型认证仅在 Agent 用户环境配置；不要复制包含服务端 USER_TOKEN 的环境文件到其他设备。tmux server 会继承首次启动时的环境，变更模型凭据后需在维护时停止会话并重新启动专用 tmux server。
 

@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RelayPilot</title>
+<title>Pangolin</title>
 <style>
 :root{color-scheme:dark;font:16px system-ui;background:#101820;color:#eaf2f6}body{max-width:900px;margin:32px auto;padding:0 18px}h1{margin-bottom:4px}small{color:#9db3c1}section{background:#192630;padding:20px;margin:18px 0;border-radius:12px}input,select,textarea,button{font:inherit;padding:10px;border:1px solid #49606e;border-radius:6px;background:#101820;color:inherit;max-width:100%;box-sizing:border-box}button{cursor:pointer;background:#245c69}label{display:inline-block;margin:6px 8px 6px 0}textarea,pre{width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:440px;overflow:auto}#status{color:#f2cb88;min-height:24px}.row{display:flex;gap:10px;flex-wrap:wrap}textarea{margin:12px 0;min-height:110px}
 </style>
-<h1>RelayPilot</h1><small>远程派任务，代码留在你的机器上。</small>
+<h1>Pangolin</h1><small>远程派任务，代码留在你的机器上。</small>
 <section><label>访问 Token <input id="token" type="password" autocomplete="off"></label><button id="connect">连接 / 刷新设备</button><p><small>Token 仅保留在当前页面，刷新后需重新输入。</small></p><label>设备 <select id="device"></select></label><button id="refresh">刷新会话</button></section>
 <section><div class="row"><label>项目 <input id="project" value="example"></label><label>Agent <select id="agent"><option>codex</option><option>claude</option></select></label><button id="create">创建会话</button></div><label>会话 <select id="session"></select></label><button id="logs">刷新输出</button><button id="stop">停止会话</button><pre id="output">选择会话查看输出</pre><textarea id="prompt" placeholder="输入任务或后续指令"></textarea><button id="send">发送指令</button><p><small>输出为手动刷新的终端快照。首次信任、登录及权限审批需在内网机器完成。</small></p></section><p id="status" role="status"></p>
 <script>

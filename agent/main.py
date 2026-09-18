@@ -14,14 +14,14 @@ from urllib.parse import urlparse
 import yaml
 from websockets.asyncio.client import connect
 
-LOG = logging.getLogger("relaypilot")
+LOG = logging.getLogger("pangolin")
 SESSION = re.compile(r"^rp-[0-9a-f]{32}$")
 
 
 class Sessions:
     def __init__(self, config):
         self.projects = config.get("projects", {})
-        self.socket = config.get("tmux_socket", "relaypilot")
+        self.socket = config.get("tmux_socket", "pangolin")
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.socket):
             raise ValueError("Invalid tmux socket name")
 

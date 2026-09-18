@@ -1,0 +1,14 @@
+[Unit]
+Description=Pangolin relay server
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=pangolin
+WorkingDirectory=/opt/Pangolin
+EnvironmentFile=/etc/pangolin/server.env
+ExecStart=/opt/Pangolin/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1 --ws-max-size 131072
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-"""RelayPilot: single-process authenticated WebSocket relay."""
+"""Pangolin: single-process authenticated WebSocket relay."""
 import asyncio
 import hmac
 import os
@@ -34,7 +34,7 @@ async def lifespan(app):
     peers.clear()
 
 
-app = FastAPI(title="RelayPilot", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Pangolin", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def auth(authorization: str = Header(default="")):
