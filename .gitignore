@@ -9,9 +9,16 @@ __pycache__/
 .coverage
 htmlcov/
 .DS_Store
+._*
 *.log
 *.pem
 *.key
 id_rsa*
 id_ed25519*
 secrets/
+
+.pangolin/
+*.sqlite3
+*.sqlite3-journal
+node_modules/
+*.tgz

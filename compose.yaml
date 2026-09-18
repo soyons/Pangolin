@@ -1,0 +1,29 @@
+name: pangolin
+services:
+  relay:
+    build: .
+    image: pangolin-relay:local
+    container_name: pangolin-relay
+    restart: unless-stopped
+    env_file: .pangolin/server.env
+    ports:
+      - "127.0.0.1:${PANGOLIN_PORT:-18080}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  default:
+    name: ${PANGOLIN_NETWORK:-pangolin}
+    external: true

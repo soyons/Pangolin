@@ -78,7 +78,7 @@ def test_real_tmux_lifecycle(tmp_path, monkeypatch):
     try:
         result = s.handle({'action': 'session.create', 'project': 'example', 'agent': 'codex'})
         sid = result['id']
-        assert {'id': sid} in s.handle({'action': 'session.list'})
+        assert result in s.handle({'action': 'session.list'})
         message = 'literal $(echo UNEXPECTED)\nsecond line'
         s.handle({'action': 'session.send', 'session': sid, 'message': message})
         deadline = time.monotonic() + 3
@@ -102,3 +102,58 @@ def test_placeholder_tokens_fail(monkeypatch):
     with pytest.raises(RuntimeError):
         with TestClient(app):
             pass
+
+
+@pytest.mark.parametrize('path,method,body,action', [
+    ('/projects', 'GET', None, 'project.list'),
+    ('/sessions/rp-test/state?after=12', 'GET', None, 'session.state'),
+    ('/sessions/rp-test/input', 'POST', {'screen_id': 'a' * 64, 'choice': '2'}, 'session.input'),
+    ('/sessions/rp-test/send', 'POST', {'message': '任务', 'request_id': 'b' * 32}, 'session.send'),
+])
+def test_new_api_roundtrip_and_auth(client, path, method, body, action):
+    url = '/api/machines/test' + path
+    assert client.request(method, url, json=body).status_code == 401
+    with client.websocket_connect('/ws/agent', headers={
+            'Authorization': 'Bearer ' + DEVICE, 'X-Device-ID': 'test'}) as ws:
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(client.request, method, url, json=body, headers={'Authorization': 'Bearer ' + USER})
+            command = ws.receive_json()
+            assert command['action'] == action
+            if action == 'session.state':
+                assert command['after'] == 12
+            if body:
+                for key, value in body.items():
+                    assert command[key] == value
+            ws.send_json({'id': command['id'], 'ok': True, 'result': {'accepted': True}})
+            assert future.result(timeout=5).json() == {'accepted': True}
+
+
+def test_input_conflict_is_visible(client):
+    with client.websocket_connect('/ws/agent', headers={
+            'Authorization': 'Bearer ' + DEVICE, 'X-Device-ID': 'test'}) as ws:
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(client.post, '/api/machines/test/sessions/rp-test/input',
+                                 json={'key': 'Enter', 'screen_id': 'f' * 64},
+                                 headers={'Authorization': 'Bearer ' + USER})
+            command = ws.receive_json()
+            ws.send_json({'id': command['id'], 'ok': False, 'status': 409, 'error': '终端内容已变化'})
+            response = future.result(timeout=5)
+            assert response.status_code == 409
+            assert response.json()['detail'] == '终端内容已变化'
+
+
+@pytest.mark.parametrize('body', [
+    {'key': 'C-z', 'screen_id': 'a' * 64},
+    {'key': 'Enter', 'screen_id': 'a' * 64, 'choice': '1'},
+    {'screen_id': 'a' * 64}, {'key': 'Enter', 'screen_id': 'bad'},
+    {'key': 'Enter', 'screen_id': 'a' * 64, 'request_id': 'invalid'},
+])
+def test_input_schema_rejects_unsafe_requests(client, body):
+    assert client.post('/api/machines/test/sessions/rp-test/input', json=body,
+                       headers={'Authorization': 'Bearer ' + USER}).status_code == 422
+
+
+def test_frontend_assets(client):
+    assert client.get('/').status_code == 200
+    assert 'text/javascript' in client.get('/app.js').headers['content-type']
+    assert 'text/css' in client.get('/app.css').headers['content-type']

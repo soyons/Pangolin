@@ -10,6 +10,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/agent/package-lock.json
       - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: pip install -r requirements-lock.txt
+      - run: bash -n install.sh scripts/docker-server.sh packages/agent/install.sh
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/agent
+      - run: npm test
+        working-directory: packages/agent
+      - run: node --check web/app.js
       - run: python -m pytest -q

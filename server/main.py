@@ -6,10 +6,11 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 peers = {}
 pending = {}
@@ -52,6 +53,16 @@ async def health():
     return {"ok": True}
 
 
+@app.get("/app.js")
+async def browser_script():
+    return FileResponse(Path(__file__).resolve().parents[1] / "web/app.js", media_type="text/javascript")
+
+
+@app.get("/app.css")
+async def browser_styles():
+    return FileResponse(Path(__file__).resolve().parents[1] / "web/app.css", media_type="text/css")
+
+
 @app.get("/api/machines", dependencies=[Depends(auth)])
 async def machines():
     return [{"id": k, "online": k in peers, "last_seen": peers.get(k, {}).get("seen")} for k in device_tokens]
@@ -70,7 +81,8 @@ async def rpc(device, action, **data):
         await peer["ws"].send_json({"id": request_id, "action": action, **data})
         reply = await asyncio.wait_for(future, 20)
         if not reply.get("ok"):
-            raise HTTPException(400, reply.get("error", "Agent rejected command"))
+            raise HTTPException(409 if reply.get("status") == 409 else 400,
+                                reply.get("error", "Agent rejected command"))
         return reply.get("result")
     except asyncio.TimeoutError:
         raise HTTPException(504, "Agent timed out; check session state before retrying")
@@ -87,6 +99,25 @@ class Create(BaseModel):
 
 class Prompt(BaseModel):
     message: str = Field(min_length=1, max_length=16000)
+    request_id: str = Field(default_factory=lambda: uuid.uuid4().hex, pattern="^[0-9a-f]{32}$")
+
+
+class TerminalInput(BaseModel):
+    screen_id: str = Field(pattern="^[0-9a-f]{64}$")
+    request_id: str = Field(default_factory=lambda: uuid.uuid4().hex, pattern="^[0-9a-f]{32}$")
+    key: Optional[Literal["Up", "Down", "Left", "Right", "Enter", "Escape", "Tab", "Space", "BSpace", "C-c"]] = None
+    choice: Optional[str] = Field(default=None, min_length=1, max_length=16)
+
+    @model_validator(mode='after')
+    def exactly_one(self):
+        if (self.key is None) == (self.choice is None):
+            raise ValueError('Supply exactly one key or choice')
+        return self
+
+
+@app.get("/api/machines/{device}/projects", dependencies=[Depends(auth)])
+async def projects(device: str):
+    return await rpc(device, "project.list")
 
 
 @app.get("/api/machines/{device}/sessions", dependencies=[Depends(auth)])
@@ -101,7 +132,17 @@ async def create(device: str, body: Create):
 
 @app.post("/api/machines/{device}/sessions/{session}/send", dependencies=[Depends(auth)])
 async def send(device: str, session: str, body: Prompt):
-    return await rpc(device, "session.send", session=session, message=body.message)
+    return await rpc(device, "session.send", session=session, **body.model_dump())
+
+
+@app.get("/api/machines/{device}/sessions/{session}/state", dependencies=[Depends(auth)])
+async def state(device: str, session: str, after: int = Query(default=0, ge=0)):
+    return await rpc(device, "session.state", session=session, after=after)
+
+
+@app.post("/api/machines/{device}/sessions/{session}/input", dependencies=[Depends(auth)])
+async def terminal_input(device: str, session: str, body: TerminalInput):
+    return await rpc(device, "session.input", session=session, **body.model_dump(exclude_none=True))
 
 
 @app.get("/api/machines/{device}/sessions/{session}/logs", dependencies=[Depends(auth)])

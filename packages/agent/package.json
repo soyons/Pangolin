@@ -1,0 +1,15 @@
+{
+  "name": "@soyons/pangolin-agent",
+  "version": "0.1.0",
+  "description": "Pangolin outbound agent for remote Codex and Claude terminal sessions",
+  "type": "module",
+  "bin": { "pangolin-agent": "bin/pangolin-agent.js" },
+  "engines": { "node": ">=22.13.0" },
+  "os": ["linux", "darwin"],
+  "files": ["bin/", "src/", "install.sh", "README.md"],
+  "scripts": { "test": "node --test test/*.test.js" },
+  "repository": { "type": "git", "url": "git+https://github.com/soyons/Pangolin.git", "directory": "packages/agent" },
+  "homepage": "https://github.com/soyons/Pangolin#readme",
+  "publishConfig": { "access": "public" },
+  "dependencies": { "ws": "^8.18.3" }
+}

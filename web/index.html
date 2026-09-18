@@ -1,24 +1,58 @@
 <!doctype html>
-<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pangolin</title>
-<style>
-:root{color-scheme:dark;font:16px system-ui;background:#101820;color:#eaf2f6}body{max-width:900px;margin:32px auto;padding:0 18px}h1{margin-bottom:4px}small{color:#9db3c1}section{background:#192630;padding:20px;margin:18px 0;border-radius:12px}input,select,textarea,button{font:inherit;padding:10px;border:1px solid #49606e;border-radius:6px;background:#101820;color:inherit;max-width:100%;box-sizing:border-box}button{cursor:pointer;background:#245c69}label{display:inline-block;margin:6px 8px 6px 0}textarea,pre{width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:440px;overflow:auto}#status{color:#f2cb88;min-height:24px}.row{display:flex;gap:10px;flex-wrap:wrap}textarea{margin:12px 0;min-height:110px}
-</style>
-<h1>Pangolin</h1><small>远程派任务，代码留在你的机器上。</small>
-<section><label>访问 Token <input id="token" type="password" autocomplete="off"></label><button id="connect">连接 / 刷新设备</button><p><small>Token 仅保留在当前页面，刷新后需重新输入。</small></p><label>设备 <select id="device"></select></label><button id="refresh">刷新会话</button></section>
-<section><div class="row"><label>项目 <input id="project" value="example"></label><label>Agent <select id="agent"><option>codex</option><option>claude</option></select></label><button id="create">创建会话</button></div><label>会话 <select id="session"></select></label><button id="logs">刷新输出</button><button id="stop">停止会话</button><pre id="output">选择会话查看输出</pre><textarea id="prompt" placeholder="输入任务或后续指令"></textarea><button id="send">发送指令</button><p><small>输出为手动刷新的终端快照。首次信任、登录及权限审批需在内网机器完成。</small></p></section><p id="status" role="status"></p>
-<script>
-const $=id=>document.getElementById(id);
-async function api(path,method='GET',body){const r=await fetch('/api/'+path,{method,headers:{Authorization:'Bearer '+$('token').value,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const v=await r.json();if(!r.ok)throw Error(typeof v.detail==='string'?v.detail:JSON.stringify(v.detail));return v}
-const base=()=>{if(!$('device').value)throw Error('请先选择设备');return 'machines/'+encodeURIComponent($('device').value)+'/sessions'};
-const selected=()=>{if(!$('session').value)throw Error('请先选择会话');return base()+'/'+encodeURIComponent($('session').value)};
-function options(el,items){const old=el.value;el.replaceChildren(...items.map(([value,label])=>{const o=document.createElement('option');o.value=value;o.textContent=label;return o}));if(items.some(i=>i[0]===old))el.value=old}
-async function refresh(){options($('session'),(await api(base())).map(s=>[s.id,s.id]));}
-function bind(id,fn){$(id).onclick=async()=>{$(id).disabled=true;$('status').textContent='处理中…';try{await fn();$('status').textContent='完成'}catch(e){$('status').textContent=e.message}finally{$(id).disabled=false}}}
-bind('connect',async()=>{options($('device'),(await api('machines')).map(d=>[d.id,d.id+(d.online?' · 在线':' · 离线')]));if($('device').value)await refresh()});
-bind('refresh',refresh);bind('create',async()=>{const s=await api(base(),'POST',{project:$('project').value,agent:$('agent').value});await refresh();$('session').value=s.id});
-bind('logs',async()=>{$('output').textContent=(await api(selected()+'/logs')).text});
-bind('send',async()=>{await api(selected()+'/send','POST',{message:$('prompt').value});$('prompt').value=''});
-bind('stop',async()=>{if(confirm('停止会话将结束当前 Agent，是否继续？')){await api(selected(),'DELETE');await refresh();$('output').textContent='会话已停止'}});
-$('device').onchange=()=>{$('session').replaceChildren();$('output').textContent='请刷新会话'};
-</script></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pangolin · 穿山甲</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header><h1>Pangolin <small>穿山甲</small></h1><p>远程派任务，代码留在你的机器上。</p></header>
+  <section aria-label="连接设备">
+    <div class="row"><label>浏览器 Token <input id="token" type="password" autocomplete="off"></label><button id="connect">连接设备</button></div>
+    <p class="hint">Token 仅保留在当前页面。请使用服务端提供的浏览器 Token。</p>
+    <div class="row"><label>设备 <select id="device"></select></label><button id="refresh">刷新会话</button></div>
+  </section>
+  <section aria-label="管理会话">
+    <div class="row"><label>项目 <select id="project"></select></label><label>Agent <select id="agent"></select></label><button id="create">创建会话</button></div>
+    <div class="row"><label class="session-label">会话 <select id="session"></select></label><button id="logs">立即刷新</button><button id="stop" class="danger">停止会话</button></div>
+    <div class="row"><label class="check"><input id="auto" type="checkbox" checked> 每 2 秒自动刷新</label><small id="updated">请选择会话</small></div>
+  </section>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div class="workspace">
+    <section class="conversation" aria-label="用户消息">
+      <h2>我的消息 <span class="badge user">用户</span></h2>
+      <p class="hint">发送的任务和交互操作单独记录，刷新页面后连接同一会话即可恢复。</p>
+      <div id="messages" role="log" aria-label="消息与操作记录"><p class="empty">还没有发送消息</p></div>
+      <form id="composer">
+        <label for="prompt">任务或回复</label>
+        <textarea id="prompt" maxlength="16000" placeholder="输入任务、追问，或终端问题的文字答案…"></textarea>
+        <div class="row"><button id="send" type="submit">发送消息</button><small>Ctrl / ⌘ + Enter 发送</small></div>
+      </form>
+    </section>
+    <section class="terminal-section" aria-label="终端消息">
+      <h2>CLI 输出 <span class="badge">终端</span></h2>
+      <p class="hint">Codex / Claude 的原始终端快照，可能包含输入回显。</p>
+      <pre id="output" tabindex="0">选择会话查看输出</pre>
+      <div id="interaction" hidden>
+        <h3>需要你的操作</h3>
+        <p class="hint">根据终端提示识别。请核对原文后选择，选项可能包含持续授权。</p>
+        <pre id="question"></pre>
+        <div id="choices" class="row"></div>
+      </div>
+      <details id="keyboard">
+        <summary>终端按键 · 审批、选择和中断</summary>
+        <p class="hint">未识别的菜单可用方向键移动、空格多选、Enter 确认。文字答案在消息框输入。</p>
+        <div class="row keys">
+          <button data-key="Up" aria-label="向上">↑</button><button data-key="Down" aria-label="向下">↓</button>
+          <button data-key="Left" aria-label="向左">←</button><button data-key="Right" aria-label="向右">→</button>
+          <button data-key="Enter">Enter 确认</button><button data-key="Escape">Esc 返回</button>
+          <button data-key="Tab">Tab 切换</button><button data-key="Space">空格 选择</button>
+          <button data-key="BSpace">退格</button><button data-key="C-c" class="danger">Ctrl+C 中断</button>
+        </div>
+      </details>
+    </section>
+  </div>
+</body>
+</html>

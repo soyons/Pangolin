@@ -1,0 +1,8 @@
+*
+!requirements.txt
+!server/
+!server/*.py
+!web/
+!web/index.html
+!web/app.js
+!web/app.css
