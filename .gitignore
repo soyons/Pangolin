@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+*.local.yaml
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+*.log
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+secrets/

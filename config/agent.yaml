@@ -1,0 +1,6 @@
+# Copy to agent.local.yaml and edit local paths. No credentials belong here.
+tmux_socket: relaypilot
+projects:
+  example:
+    path: /absolute/path/to/your/project
+    agents: [codex, claude]

@@ -1,0 +1,14 @@
+[Unit]
+Description=RelayPilot outbound agent
+After=network-online.target
+Wants=network-online.target
+[Service]
+# Install as a user service for the account that owns the projects and CLI login.
+WorkingDirectory=%h/RelayPilot
+EnvironmentFile=%h/.config/relaypilot/agent.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/RelayPilot/.venv/bin/python -m agent.main
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=default.target
