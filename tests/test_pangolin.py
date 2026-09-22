@@ -16,6 +16,7 @@ DEVICE = 'd' * 40
 
 @pytest.fixture
 def client(monkeypatch):
+    monkeypatch.setenv('PANGOLIN_AUTH_MODE', 'legacy')
     monkeypatch.setenv('USER_TOKEN', USER)
     monkeypatch.setenv('DEVICE_TOKENS', 'test:' + DEVICE)
     with TestClient(app) as c:
@@ -97,6 +98,7 @@ def test_real_tmux_lifecycle(tmp_path, monkeypatch):
 
 
 def test_placeholder_tokens_fail(monkeypatch):
+    monkeypatch.setenv('PANGOLIN_AUTH_MODE', 'legacy')
     monkeypatch.setenv('USER_TOKEN', 'REPLACE_WITH_RANDOM_USER_TOKEN')
     monkeypatch.setenv('DEVICE_TOKENS', 'test:REPLACE_WITH_RANDOM_DEVICE_TOKEN')
     with pytest.raises(RuntimeError):

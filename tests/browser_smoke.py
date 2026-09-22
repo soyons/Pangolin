@@ -92,6 +92,7 @@ def main():
         with (temp / 'process.log').open('w+') as log:
             try:
                 env = {**os.environ, 'USER_TOKEN': USER, 'DEVICE_TOKENS': 'test:' + DEVICE,
+                       'PANGOLIN_AUTH_MODE': 'legacy',
                        'DEVICE_ID': 'test', 'DEVICE_TOKEN': DEVICE, 'AGENT_CONFIG': str(config),
                        'RELAY_WS_URL': f'ws://127.0.0.1:{port}/ws/agent',
                        'PATH': str(temp) + os.pathsep + os.environ['PATH']}

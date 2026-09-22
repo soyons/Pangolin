@@ -4,6 +4,10 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 User=pangolin
+UMask=0077
+StateDirectory=pangolin
+StateDirectoryMode=0700
+Environment=PANGOLIN_DATABASE=/var/lib/pangolin/server.sqlite3
 WorkingDirectory=/opt/Pangolin
 EnvironmentFile=/etc/pangolin/server.env
 ExecStart=/opt/Pangolin/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1 --ws-max-size 131072

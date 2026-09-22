@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 if [[ "${1:-}" == agent ]]; then shift; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  echo 'Usage: bash install.sh [--relay https://HOST] [--device devbox] [--project PATH] [--token-file FILE] [--prefix PATH] [--no-start]'
+  echo 'Usage: bash install.sh [--server https://HOST] [--email EMAIL] [--device NAME] [--project PATH] [--password-file FILE] [--prefix PATH] [--no-start]'
   echo 'Installs the Node.js Agent for the current user; no Python or git required.'
   echo 'PANGOLIN_PACKAGE=/path/to/package.tgz or @soyons/pangolin-agent@VERSION selects an npm package.'
   exit 0

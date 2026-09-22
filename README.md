@@ -1,208 +1,186 @@
 # Pangolin · 穿山甲
 
-用浏览器给内网机器上的 Codex / Claude 派任务，查看输出并处理审批、选项。内网 Agent 主动连接公网 Relay，无需给内网开放端口。
+在浏览器使用邮箱密码登录，给内网机器上的 Codex / Claude 派任务、查看输出并处理审批。内网客户端主动连接公网服务端，无需开放内网端口。同一账号可以在手机、电脑查看自己的设备和已同步对话。
 
 ```text
-手机 / 浏览器 ── HTTPS ──> 公网 Relay <── WSS ── 内网 Agent → Codex / Claude
+手机 / 电脑浏览器 ── HTTPS ──> 服务端：账号、设备、对话历史
+                                   ↑ WSS
+                              内网 Node Agent → tmux → Codex / Claude
 ```
 
 ## 一条命令安装
 
-浏览器就是用户界面，无需安装手机 App。需要安装的是 **公网服务端** 和 **内网 Agent**。默认使用原生后台服务，无需 Docker；配置、随机 Token、依赖和后台服务均由脚本处理。
+需要安装 **公网服务端** 和 **内网客户端**，浏览器无需安装 App。下面的远程命令需要 GitHub `main` 已包含此版本；已有源码可直接使用后面的本地安装命令。
 
-**下面的命令可复制后替换参数执行。** 将 `你的公网IP`、`agent.example.com`、`/你的项目绝对路径` 替换为实际值；路径保留引号，可包含空格。
+### 1. 公网服务端
 
-内网客户端是独立 Node.js 包 `@soyons/pangolin-agent`。脚本自动准备 Node 环境，从 GitHub 下载源码、打包并安装；**无需 Python、git 或先手动安装 npm 包**。目前尚未发布到 npm registry，下面的 curl 安装不依赖 npm 发布。
-
-### 1. 安装公网服务端
-
-在 **公网服务器** 的 Bash / Zsh 终端执行，使用 root 或有 sudo 权限的账号：
+使用 Ubuntu 22.04+ / Debian 12+、固定公网 IP，放行 TCP **80、443**。在 root 或有 sudo 权限的账号终端执行，替换实际公网 IP：
 
 ```bash
 set -o pipefail
 curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/install.sh | bash -s -- server --ip "你的公网IP"
 ```
 
-已有域名时，先将域名解析到服务器，再用下面这条命令代替上面的 IP 安装命令：
+已有域名时先设置 DNS，再改用：
 
 ```bash
 set -o pipefail
 curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/install.sh | bash -s -- server --domain "agent.example.com"
 ```
 
-安装完成后查看连接凭据。**root 安装**执行：
+脚本准备 Python、后台服务和 HTTPS。IP 证书首次申请需按 Certbot 提示确认条款，IP 必须公网可达；已有 HTTPS 反向代理时执行 `bash install.sh server`，代理到 `127.0.0.1:8000`。
+
+新安装默认开启邮箱账号注册。打开 `https://你的公网IP` 或域名，填写邮箱和 **12–128 位密码** 注册。**暂不发送验证邮件，也不提供邮件找回密码**；邮箱只作为账号标识，无需配置 SMTP。
+
+私人部署不想开放注册，可在安装时加 `--registration closed`，然后在服务器本机创建账号：
 
 ```bash
-/opt/pangolin/pangolin credentials
+# root 安装的管理入口
+sudo /opt/pangolin/pangolin create-user --email "you@example.com"
 ```
 
-**普通账号安装**执行：
+普通账号安装则使用 `~/.local/share/pangolin/pangolin create-user --email "you@example.com"`。密码隐藏输入。所有网页账号权限相同，首个注册者不会自动获得管理员权限；账号管理通过服务器本机命令完成。
 
-```bash
-~/.local/share/pangolin/pangolin credentials
-```
+### 2. 内网客户端
 
-记下输出中的 **浏览器 USER_TOKEN**、**设备 ID** 和 **设备 DEVICE_TOKEN**；两种 Token 用途不同。
-
-### 2. 安装内网 Agent（Node.js 客户端）
-
-在 **保存项目、已经安装并登录 Codex / Claude 的电脑** 上执行。使用日常开发的普通账号，不要给整条命令加 sudo。最简安装会依次询问 Relay 地址、设备 ID、设备 Token 和项目目录：
+在保存项目的 macOS / Linux 电脑上先安装并登录 `codex` 或 `claude`。用日常开发账号执行，**不要 sudo 整条命令**：
 
 ```bash
 set -o pipefail
 curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/packages/agent/install.sh | bash
 ```
 
-也可以直接提供连接参数：
+也可预先指定服务端、邮箱和项目路径：
 
 ```bash
 set -o pipefail
-curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/packages/agent/install.sh | bash -s -- --relay "https://你的公网IP" --device devbox --project "/你的项目绝对路径"
+curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/packages/agent/install.sh | bash -s -- \
+  --server "https://你的公网IP" --email "you@example.com" --project "/你的项目绝对路径"
 ```
 
-如果服务端使用域名，对应命令为：
+按提示输入网页注册的账号密码。客户端自动绑定设备，保存仅限本设备使用的凭据，**不保存账号密码**。`--device "我的开发机"` 可设置显示名称；设备 ID 自动生成，无需复制 Token。
 
-```bash
-set -o pipefail
-curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/packages/agent/install.sh | bash -s -- --relay "https://agent.example.com" --device devbox --project "/你的项目绝对路径"
-```
+客户端是 Node 包 `@soyons/pangolin-agent`，无需 Python 或 git。脚本复用 Node.js 22.13+ 和 npm；缺失时下载官方 Node.js 22 并校验 SHA-256。需要 tmux 3.2+，缺失时 Linux 使用 sudo apt，macOS 使用已有 Homebrew。支持 x64 / arm64，安装需访问 GitHub、npm registry，准备 Node 时还需访问 nodejs.org。
 
-按提示粘贴上一步的 **设备 DEVICE_TOKEN**，输入内容不会显示在终端，也不写入命令历史。默认设备 ID 是 `devbox`；如果服务端显示其他 ID，将命令里的 `devbox` 一起替换。
+**包尚未发布到 npm registry。** curl 脚本从 GitHub 下载源码，运行 `npm pack` 后安装，因此不依赖 npm 发布。
 
-查看 Agent 的运行状态和连接日志：
+### 3. 登录并使用
 
-```bash
-~/.local/bin/pangolin-agent status
-~/.local/bin/pangolin-agent logs
-```
+浏览器登录同一账号，选择在线设备、项目 `example` 和 Codex / Claude，创建会话后发送任务。内网 Agent 离线时仍可查看已经同步的历史，发送和审批会暂停，首版不排队执行离线指令。
 
-### 3. 打开网页使用
-
-在手机或电脑浏览器打开 `https://你的公网IP`（域名安装则打开 `https://agent.example.com`），输入 **浏览器 USER_TOKEN**，选择在线设备、项目 `example` 和 Codex / Claude，然后创建会话并发送任务。`example` 对应安装 Agent 时指定的项目目录。
-
-### 安装前需要准备
-
-**服务端要求**：Ubuntu 22.04+ / Debian 12+、固定公网 IP，安全组和防火墙放行 TCP 80、443。Python 缺失时通过 apt 安装。脚本自动配置 Caddy、IP HTTPS 证书和续期；首次申请按 Certbot 提示确认条款。IP 证书需要证书机构验证公网可达性，IP 改变后需重新配置。[证书支持说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)
-
-**Agent 要求**：macOS / Linux，用拥有项目和 CLI 登录信息的账号运行，先安装并登录 `codex` 或 `claude`。脚本自动识别已有 CLI，复用 Node.js 22.13+ 和 npm；缺失时从 nodejs.org 下载校验过 SHA-256 的 Node.js 22 到用户目录。需要 tmux 3.2+；缺失时 Linux 使用 sudo apt 安装，macOS 使用已有 Homebrew。支持 x64 / arm64；需能访问 GitHub、npm registry，下载 Node 时还需访问 nodejs.org。客户端无需入站端口，模型登录认证仍由 CLI 自己处理。
-
-## 其他安装方式
-
-### 私有仓库安装（GitHub CLI）
-
-在需要安装的机器上准备 GitHub CLI，并登录有仓库访问权限的账号；如果已登录可跳过：
-
-```bash
-gh auth login
-```
-
-**公网服务器**执行：
-
-```bash
-set -o pipefail
-gh api -H 'Accept: application/vnd.github.raw+json' 'repos/soyons/Pangolin/contents/install.sh?ref=main' | bash -s -- server --ip "你的公网IP"
-```
-
-**内网电脑**执行：
-
-```bash
-set -o pipefail
-gh api -H 'Accept: application/vnd.github.raw+json' 'repos/soyons/Pangolin/contents/packages/agent/install.sh?ref=main' | bash -s -- --relay "https://你的公网IP" --device devbox --project "/你的项目绝对路径"
-```
-
-凭据查看、设备 Token 输入和网页访问方式与上面的步骤相同。已登录的 GitHub CLI 也用于下载私有仓库源码。
-
-### 本地源码安装
-
-已有源码时，在项目根目录执行即可，不需要下载远程 `install.sh`。
-
-**公网服务器**执行：
-
-```bash
-cd "/源码所在目录/Pangolin"
-bash install.sh server --ip "你的公网IP"
-```
-
-**内网电脑**执行：
-
-```bash
-cd "/源码所在目录/Pangolin"
-bash install.sh agent --relay "https://你的公网IP" --device devbox --project "/你的项目绝对路径"
-```
-
-`bash install.sh agent` 默认安装 Node 客户端。兼容旧 Python 客户端的入口是 `bash install.sh agent --python --relay "https://你的公网IP" --device devbox --project "/你的项目绝对路径"`。
-
-### Docker 服务端安装（可选）
-
-公网服务器已安装 Docker Engine 和 Compose，并准备接入已有 HTTPS 反向代理时，可执行：
-
-```bash
-set -o pipefail
-curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/install.sh | bash -s -- server --docker
-```
-
-远程 Docker 安装默认将源码保存在 `~/Pangolin`，服务映射到 `127.0.0.1:18080`；安装后仍需配置 HTTPS 代理。查看凭据：
-
-```bash
-cd ~/Pangolin
-python3 scripts/docker-credentials.py
-```
-
-### 其他参数
-
-默认从 GitHub `main` 获取源码；可通过 `PANGOLIN_REF` 指定分支或 tag，例如 `curl -fsSL https://raw.githubusercontent.com/soyons/Pangolin/main/packages/agent/install.sh | PANGOLIN_REF=v0.1.0 bash`（需该 tag 已存在）。Node 客户端使用源码压缩包，服务端使用 git clone。下载失败会退出。
-
-- **已有 HTTPS 反向代理**：`bash install.sh server`，代理至 `127.0.0.1:8000`。不传 `--ip/--domain` 时仅本机访问。
-- **Docker 网络**：默认 `pangolin`，可用 `server --docker --network 网络名` 修改。
-- **只准备文件**：加 `--no-start`，不注册服务或配置 HTTPS。
-- **指定配置位置**：加 `--prefix /绝对路径`，后续管理命令也带该参数。Node 程序默认安装在 `~/.local/share/pangolin-node`；用 `PANGOLIN_INSTALL_HOME` 修改程序位置。
-- **已有 Node 包**：`PANGOLIN_PACKAGE=/绝对路径/soyons-pangolin-agent-0.1.0.tgz bash packages/agent/install.sh`。发布 npm 后也可改为 `@soyons/pangolin-agent@版本`。
-- **无人值守输入设备 Token**：加 `--device devbox --token-file /私有文件`。IP 证书首次签发仍需确认条款。
-- **本机测试**：服务端不传 `--ip/--domain`；Agent 使用 `--relay http://127.0.0.1:8000`。
-
-API key 只在内网安装 Agent 的终端中配置。安装器将已有的 `OPENAI_API_KEY/OPENAI_BASE_URL/ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN` 写入本机权限为 600 的配置，用于后台运行，不发往 Relay。
-
-## 消息与交互
-
-- **我的消息**：单独显示发送的任务、文字答案和按键/选项操作，明确标记用户来源。历史保存在 Agent 本机 SQLite 中；重新连接或重启 Agent 后可恢复，停止会话时清除该会话的记录。
-- **CLI 输出**：独立显示终端快照，每 2 秒自动刷新，可暂停或手动刷新。原始输出可能包含 CLI 的输入回显，不将这些回显当作新的用户消息或结构化模型回复。
-- **审批和选项**：常见 Codex / Claude 编号菜单、`y/n`、继续提示可显示按钮，保留原始选项文字，包括“本次允许”“持续允许”“拒绝”等含义，由用户决定。
-- **其他交互**：可展开终端按键，使用方向键、Tab、空格多选、Enter、Esc、退格或 Ctrl+C；自由文本答案在消息框发送。
-- **过期与重试**：审批和按键先校验当前终端画面；画面变化时拒绝旧操作并要求重新核对。同一请求 ID 不重复发送；失败后会显示执行状态待核对。
-
-交互识别基于当前可见的终端文字，不是 CLI 的原生结构化审批协议。CLI 升级、复杂布局或多选问题可能需要使用按键面板，首次登录也可能需要在内网机器完成。不会启用跳过审批或放宽 CLI 沙箱的参数。建议服务端与 Agent 一起更新。
+用户消息、交互记录与终端输出分别显示。常见编号菜单、`y/n` 和继续提示会显示按钮；未识别的提示可使用方向键、Enter、Tab、空格、Esc 或 Ctrl+C。点击前请核对原文，选项可能包含持续授权。
 
 ## 日常管理
 
-Agent 配置及历史默认保存在 `~/.local/share/pangolin`，Node 程序在 `~/.local/share/pangolin-node`，管理入口在 `~/.local/bin/pangolin-agent`。将 `~/.local/bin` 加入 PATH 后可直接输入 `pangolin-agent`。root 服务端安装在 `/opt/pangolin`，Relay 以专用低权限 `pangolin` 用户运行。
+客户端默认入口在 `~/.local/bin`，加入 PATH 后可直接输入 `pangolin-agent`：
 
 ```bash
 ~/.local/bin/pangolin-agent status
 ~/.local/bin/pangolin-agent logs
 ~/.local/bin/pangolin-agent stop
 ~/.local/bin/pangolin-agent start
+~/.local/bin/pangolin-agent login       # 重新登录并重启后台服务
+~/.local/bin/pangolin-agent logout      # 撤销设备登录，保留本机 CLI 会话和历史
 ```
 
-服务端使用 `/opt/pangolin/pangolin status server`、`logs server`、`stop server`、`start server`；普通账号安装则使用 `~/.local/share/pangolin/pangolin`。macOS 使用 launchd，Linux 使用 systemd。普通账号的 Linux 服务若需退出 SSH 后持续运行，按安装结束提示执行 `sudo loginctl enable-linger 用户名`。
+服务端管理命令：
 
-升级时重复相同安装命令，保留原 Token 并重启服务。Node Agent 沿用 Python 安装器的配置、SQLite 历史和服务名称，安装后替换原后台服务并保留现有 tmux 会话。手动启动的旧 Agent 需先停止，避免相同设备 ID 同时连接；自定义配置目录需继续传入相同 `--prefix`。Docker 安装在原目录更新源码后重跑 `bash install.sh server --docker`。Agent 是否连上 Relay 以日志和网页在线状态为准。
+```bash
+sudo /opt/pangolin/pangolin status server
+sudo /opt/pangolin/pangolin logs server
+sudo /opt/pangolin/pangolin reset-password --email "you@example.com"
+sudo /opt/pangolin/pangolin backup --output /opt/pangolin/state/backup.sqlite3
+```
 
-Relay 是单用户、单进程应用，持有浏览器 Token 可操作全部配置设备。项目白名单限制启动目录，不能替代 CLI 或操作系统沙箱；没有任意 `shell.exec` 接口。Relay 会接触指令和终端输出，模型凭据保留在内网。超时不代表未执行，核对终端和消息记录后再重试。
+普通账号服务端将 `/opt/pangolin/pangolin` 换成 `~/.local/share/pangolin/pangolin` 并去掉 sudo。忘记密码由管理员通过本机 `reset-password` 重置。网页改密码和本机重置都会撤销所有浏览器、设备登录，客户端需重新 `login`。
 
-## 开发与验证
+macOS 使用 launchd，Linux 使用 systemd 用户服务。普通账号退出 SSH 后仍需运行时，按安装提示设置 `sudo loginctl enable-linger 用户名`。无 systemd 环境可安装时加 `--no-start`，再执行 `pangolin-agent run` 前台运行。
+
+## 同步与数据保留
+
+- 一个账号可以绑定多台设备；不同账号的设备、对话和操作相互隔离。网页可解除设备绑定，解绑后保留已同步历史。
+- 同步 Pangolin 管理的会话、用户消息、审批记录和**最近一次有变化的终端快照**。暂不导入其他终端独立启动的 Codex / Claude 历史，也不解析结构化模型回复。
+- Agent 每约 2 秒采集终端变化，即使没有打开浏览器也继续同步；本地持久化队列支持断线补传，重复传输不重复写入。网页接收变更通知并增量读取历史。
+- **停止会话**结束 CLI 并保留历史；**删除对话**删除同步记录并结束 CLI，离线时在重连后清理本机记录，旧补传不会恢复已删除对话。
+- 已停止会话默认保留 30 天，清理由服务端启动时和每小时执行。可在安装时用 `--history-days 90` 修改；运行中会话不会自动清除。终端最多保留最近 8000 字符，快照不能保证捕获所有快速滚动内容。
+- 任务文字和终端内容会持久化到服务端；项目文件、Codex / Claude 登录信息及模型 API key 留在内网。备份可能包含已删除对话，需单独管理备份保留期限。
+
+服务端数据库默认在安装目录的 `state/server.sqlite3`；客户端配置为 `~/.local/share/pangolin/agent.json`，本地历史为 `state/sessions.sqlite3`，私有文件权限为 600。Node 程序在 `~/.local/share/pangolin-node`。升级时重复安装命令，保留配置和数据库；服务端安装器在更新前备份已有数据库。
+
+## 旧 Token 版本升级
+
+**旧服务端原配置会继续使用 Token 模式**，不会自动把旧设备交给新注册账号。账号模式需要服务端和 Node 客户端一起更新；Python 客户端保留为旧模式兼容实现。
+
+1. 更新两端源码/安装，先在服务端创建目标账号并设置旧设备归属：
+
+```bash
+sudo /opt/pangolin/pangolin create-user --email "you@example.com"
+sudo /opt/pangolin/pangolin import-device --email "you@example.com" --device devbox
+```
+
+2. 服务端重复原安装命令并添加 `--auth-mode accounts`，例如：
+
+```bash
+bash install.sh server --ip "你的公网IP" --auth-mode accounts
+```
+
+保持原安装账号、原 `--prefix`；root 原安装请以 root 运行。旧 Token 不再被账号模式接受。
+
+3. 内网机器使用新 Node 客户端登录，明确同意上传已有 Pangolin 会话历史：
+
+```bash
+~/.local/bin/pangolin-agent login --email "you@example.com" --sync-existing
+```
+
+保持原配置目录，后台服务会被替换；手动运行的旧 Agent 请先停止。迁移前自动备份已有本地历史库。不需要导入旧历史时，使用新 `--prefix /新的配置目录` 登录即可。已绑定的历史不能切换给其他账号或服务端，需使用独立配置目录。一个系统用户只有一个默认 Pangolin 后台服务，多账号同时运行需使用独立系统用户或分别前台运行。
+
+## 其他安装与开发方式
+
+已有源码时：
+
+```bash
+bash install.sh server --ip "你的公网IP"
+bash install.sh agent --server "https://你的公网IP" --email "you@example.com" --project "/你的项目绝对路径"
+```
+
+私有仓库已登录 GitHub CLI 时：
+
+```bash
+set -o pipefail
+gh api -H 'Accept: application/vnd.github.raw+json' 'repos/soyons/Pangolin/contents/install.sh?ref=main' | bash -s -- server --ip "你的公网IP"
+gh api -H 'Accept: application/vnd.github.raw+json' 'repos/soyons/Pangolin/contents/packages/agent/install.sh?ref=main' | bash
+```
+
+Docker 服务端（需自行配置 HTTPS 代理；默认监听 `127.0.0.1:18080`）：
+
+```bash
+bash install.sh server --docker
+# SQLite 保存在 pangolin-data 命名卷，勿用 down -v 删除数据
+# 本机账号管理：
+docker compose --env-file .pangolin/compose.env exec relay python -m server.admin create-user --email "you@example.com"
+```
+
+自定义 HTTPS 代理需转发真实 Host 和协议；在配置中设置 `public_url`（原生安装）或 `PANGOLIN_PUBLIC_URL`（环境变量）为浏览器使用的准确站点地址。服务端保持单进程/单 worker。安装参数、开发接口和数据恢复见 [手动部署说明](docs/manual.md)，Node 打包见 [客户端说明](packages/agent/README.md)。
+
+验证：
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-lock.txt
 .venv/bin/python -m pytest -q
-node --check web/app.js
-bash -n install.sh scripts/docker-server.sh packages/agent/install.sh
 npm ci --prefix packages/agent --ignore-scripts
 npm test --prefix packages/agent
+node --check web/app.js
+bash -n install.sh scripts/docker-server.sh packages/agent/install.sh
 ```
 
-可选的浏览器完整流程测试使用本地假 CLI，不调用模型：安装 `playwright` 以及 Chrome（或运行 `python -m playwright install chromium`）后，执行 `.venv/bin/python tests/browser_smoke.py --agent node`。`--agent python` 验证兼容客户端，`--agent migration` 验证 Python 切换到 Node 后会话和历史恢复。覆盖消息发送与重试、选项、历史恢复、中断和手机布局。
+浏览器完整流程使用本地模拟 CLI，不调用模型。安装 Playwright 和 Chromium 后运行：
 
-`install.sh` 为统一入口，`scripts/` 负责安装、HTTPS 和服务管理，`packages/agent/` 是可打包发布的 Node 客户端（[包说明](packages/agent/README.md)），`agent/` 保留 Python 兼容实现，`server/` 为鉴权中继，`web/` 为浏览器界面。
+```bash
+.venv/bin/pip install playwright
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tests/account_smoke.py
+.venv/bin/python tests/browser_smoke.py --agent node   # 旧 Token 模式兼容检查
+```
 
-[手动部署与 API 说明](docs/manual.md)。项目按原 remote-agent-controller 会话设计重建；未取回原源码附件。仅提交模板，本地凭据、日志和私钥不入库。
+审批识别基于终端文字；首次 CLI 登录仍可能需要本机处理。项目白名单限制启动目录，不能代替 CLI 或操作系统沙箱。Pangolin 不会自动跳过 CLI 审批，也没有任意远程 shell 执行接口。

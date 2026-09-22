@@ -174,3 +174,52 @@ def test_failed_download_never_runs_installer(bootstrap):
                             text=True, env=env, capture_output=True)
     assert result.returncode != 0
     assert not Path(env['CAPTURE']).exists()
+
+
+def test_account_install_defaults_and_explicit_legacy_migration(tmp_path):
+    fresh = configure(args(), {})
+    assert fresh['auth_mode'] == 'accounts'
+    legacy = {key: value for key, value in fresh.items() if key not in ('auth_mode', 'registration', 'history_days')}
+    assert configure(args(), legacy)['auth_mode'] == 'legacy'
+    upgraded = configure(args(auth_mode='accounts', registration='closed', history_days=90), legacy)
+    assert upgraded['auth_mode'] == 'accounts'
+    assert upgraded['registration'] == 'closed'
+    assert upgraded['history_days'] == 90
+    private_write(tmp_path / 'server.json', json.dumps(upgraded))
+    command, env = runtime(tmp_path, 'server')
+    assert env['PANGOLIN_AUTH_MODE'] == 'accounts'
+    assert env['PANGOLIN_DATABASE'] == str(tmp_path / 'state/server.sqlite3')
+    assert env['PANGOLIN_REGISTRATION'] == 'closed'
+    assert env['PANGOLIN_HISTORY_DAYS'] == '90'
+    assert '--workers' in command and command[command.index('--workers') + 1] == '1'
+
+
+def test_local_account_admin_create_reset_import_backup(tmp_path):
+    import sys
+    from server.storage import Store
+    from server.accounts import PASSWORDS
+    database = tmp_path / 'server.sqlite3'
+    password = tmp_path / 'password'
+    password.write_text('private test password with spaces')
+    command = [sys.executable, '-m', 'server.admin']
+    def invoke(action, *arguments):
+        return subprocess.run([*command, action, '--database', str(database), *arguments], check=True, capture_output=True, text=True)
+    invoke('create-user', '--email', 'test@example.com', '--password-file', str(password))
+    store = Store(database)
+    user = store.user('test@example.com')
+    token, _ = store.login(user['id'])
+    device = store.bind(user['id'], 'test')
+    invoke('import-device', '--email', 'test@example.com', '--device', 'devbox')
+    assert store.device(user['id'], 'devbox')['revoked'] == 1
+    backup = tmp_path / 'backup.sqlite3'
+    invoke('backup', '--output', str(backup))
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+    restored = Store(backup)
+    assert restored.user('test@example.com')['id'] == user['id']
+    restored.close()
+    password.write_text('new private test password')
+    invoke('reset-password', '--email', 'test@example.com', '--password-file', str(password))
+    assert store.authenticate(token) is None
+    assert store.device_auth(device['device'], device['device_token']) is None
+    assert PASSWORDS.verify(store.user('test@example.com')['password_hash'], 'new private test password')
+    store.close()

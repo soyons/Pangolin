@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 
 def command(prefix, action, role, platform=None):
@@ -27,11 +28,20 @@ def runtime(prefix, role):
     env = dict(os.environ)
     env['PATH'] = config['path']
     if role == 'server':
+        env['PANGOLIN_AUTH_MODE'] = config.get('auth_mode', 'legacy')
+        env['PANGOLIN_DATABASE'] = str(prefix / 'state/server.sqlite3')
+        env['PANGOLIN_REGISTRATION'] = config.get('registration', 'open')
+        env['PANGOLIN_HISTORY_DAYS'] = str(config.get('history_days', 30))
+        ip = config.get('ip', '')
+        site = config.get('domain') or ('[' + ip + ']' if ':' in ip else ip)
+        env['PANGOLIN_PUBLIC_URL'] = config.get('public_url') or ('https://' + site if site else '')
         env['USER_TOKEN'] = config['user_token']
         env['DEVICE_TOKENS'] = config['device'] + ':' + config['device_token']
         args = ['-m', 'uvicorn', 'server.main:app', '--host', '127.0.0.1',
                 '--port', str(config['port']), '--workers', '1', '--ws-max-size', '131072']
     else:
+        if config.get('account_id'):
+            raise ValueError('该配置已升级为账号模式，请使用 ~/.local/bin/pangolin-agent 管理客户端')
         env.pop('USER_TOKEN', None)
         env.pop('DEVICE_TOKENS', None)
         env.update(config.get('model_environment', {}))
@@ -49,14 +59,55 @@ def runtime(prefix, role):
 
 
 def main():
+    os.umask(0o077)
     p = argparse.ArgumentParser(description='Pangolin service manager')
     p.add_argument('--prefix', type=Path, required=True)
-    p.add_argument('action', choices=['run', 'status', 'start', 'stop', 'logs', 'credentials'])
+    p.add_argument('action', choices=['run', 'status', 'start', 'stop', 'logs', 'credentials', 'create-user', 'reset-password', 'import-device', 'backup'])
+    p.add_argument('--email')
+    p.add_argument('--password-file')
+    p.add_argument('--device')
+    p.add_argument('--output')
     p.add_argument('role', choices=['server', 'agent'], nargs='?')
     args = p.parse_args()
     prefix = args.prefix.resolve()
+    if args.action in ('create-user', 'reset-password', 'import-device', 'backup'):
+        admin_args = [str(prefix / 'venv/bin/python'), '-m', 'server.admin', args.action, '--database', str(prefix / 'state/server.sqlite3')]
+        for option in ('email', 'device', 'output'):
+            value = getattr(args, option)
+            if value:
+                admin_args += ['--' + option.replace('_', '-'), str(Path(value).resolve()) if option in ('password_file', 'output') else value]
+        # Use the same database owner as the service; root-created WAL files would prevent service writes.
+        kwargs = {}
+        if os.geteuid() == 0 and (prefix / 'state').exists():
+            info = (prefix / 'state').stat()
+            if info.st_uid != 0:
+                kwargs = {'user': info.st_uid, 'group': info.st_gid}
+        password_temp = None
+        try:
+            if args.action in ('create-user', 'reset-password'):
+                if args.password_file:
+                    password = Path(args.password_file).read_text().removesuffix('\n').removesuffix('\r')
+                else:
+                    sys.path.insert(0, str(Path(__file__).resolve().parent))
+                    from install import ask
+                    password = ask('新密码（至少 12 位）', secret=True)
+                    if password != ask('再次输入新密码', secret=True):
+                        raise ValueError('两次密码不一致')
+                fd, password_temp = tempfile.mkstemp(dir=prefix / 'state')
+                with os.fdopen(fd, 'w') as output:
+                    output.write(password)
+                if kwargs:
+                    os.chown(password_temp, kwargs['user'], kwargs['group'])
+                admin_args += ['--password-file', password_temp]
+            raise SystemExit(subprocess.call(admin_args, cwd=prefix / 'app', **kwargs))
+        finally:
+            if password_temp:
+                os.unlink(password_temp)
     if args.action == 'credentials':
         config = json.loads((prefix / 'server.json').read_text())
+        if config.get('auth_mode') == 'accounts':
+            print('此服务端使用邮箱密码登录。请在网页注册，或执行 create-user --email 邮箱。')
+            return
         print('浏览器 USER_TOKEN: ' + config['user_token'])
         print('设备 ID: ' + config['device'])
         print('设备 DEVICE_TOKEN: ' + config['device_token'])

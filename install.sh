@@ -75,7 +75,9 @@ if [[ -z "$SOURCE" || ! -f "$SOURCE/scripts/install.py" ]]; then
 fi
 if [[ "$(uname -s)" == Linux ]] && command -v apt-get >/dev/null; then
   # Python on Debian splits the venv/ensurepip module into an extra package.
-  python3 -c 'import ensurepip, venv' 2>/dev/null || PACKAGES+=(python3-venv)
+  VENV_PYTHON=python3
+  if [[ "$ROLE" == server && "$(id -u)" == 0 && -x /usr/bin/python3 ]]; then VENV_PYTHON=/usr/bin/python3; fi
+  "$VENV_PYTHON" -c 'import ensurepip, venv' 2>/dev/null || PACKAGES+=(python3-venv)
   if ((${#PACKAGES[@]})); then
     as_admin apt-get update
     as_admin apt-get install -y "${PACKAGES[@]}"

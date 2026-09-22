@@ -9,6 +9,8 @@ services:
     ports:
       - "127.0.0.1:${PANGOLIN_PORT:-18080}:8000"
     read_only: true
+    volumes:
+      - pangolin-data:/data
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
     cap_drop: [ALL]
@@ -27,3 +29,5 @@ networks:
   default:
     name: ${PANGOLIN_NETWORK:-pangolin}
     external: true
+volumes:
+  pangolin-data:

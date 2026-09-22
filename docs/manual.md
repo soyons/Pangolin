@@ -1,95 +1,20 @@
-# Pangolin
+# 手动部署与接口
 
-精简的远程 Codex / Claude 控制器：浏览器通过 HTTPS 给公网 Relay 派任务，内网 Agent 主动建立 WSS 连接，在本机 tmux 中运行 CLI。
+常规安装和旧版本升级先看 [README](../README.md)。当前默认是邮箱密码账号模式；Python 客户端只用于显式启用的旧 Token 模式。
 
-这是根据原 remote-agent-controller 会话的 MVP 设计重新实现的版本；原会话引用的源码附件未能取回，并非原附件的逐字复制。
+## 本地开发
 
-```text
-浏览器 ── HTTPS + USER_TOKEN ──> Relay (FastAPI)
-                                    ↑
-                              WSS + DEVICE_TOKEN
-                                    │
-                              内网 Agent → tmux → Codex / Claude
-```
-
-## 功能与边界
-
-- 用户与设备分别使用随机 token；设备 token 绑定设备 ID。
-- 创建、列出、发送 prompt、读取终端输出、停止会话。
-- 用户消息、交互操作与终端快照分开显示；每 2 秒轮询更新。
-- 常见审批/编号选项按钮，以及有限的终端按键、自由文本回复。
-- 设备 heartbeat、断线重连、离线错误及请求超时处理。
-- 本机配置项目及 Agent 白名单；没有任意 shell.exec 接口。
-- 使用独立的 tmux socket `pangolin`，只管理 `rp-<uuid>` 会话。
-- 浏览器 token 只留在页面内存；日志以文本展示。
-
-这是单用户、单进程 MVP。所有持有 USER_TOKEN 的客户端可控制全部配置设备。Relay 不持久化任务、日志或设备状态；tmux 会话可在 Agent 重连后重新列出。超时不等于命令未执行，请先刷新状态，勿盲目重试创建或发送操作。
-
-交互卡片根据当前可见终端识别，不是原生结构化审批协议；不同 CLI 版本和复杂布局可能无法识别，可使用按键面板或在内网终端处理。多选问题可用方向键、空格和 Enter，自由文本在消息框输入。首次认证可能仍需在本机完成。未实现模型原生流事件和自动任务完成判定。CLI 保留自身的权限与沙箱设置，不自动跳过审批。项目白名单只限制启动目录，不能替代 CLI 或操作系统沙箱；Agent 运行权限等同于其本机用户。
-
-Agent 在配置中的 `state_path` 保存 SQLite 消息记录（文件权限 600）；Node 客户端默认使用配置目录下的 `state/sessions.sqlite3`，手动运行 Python 客户端则默认使用 YAML 配置旁的 `.pangolin/sessions.sqlite3`。记录可跨 Agent 重启恢复，停止会话会清除对应消息；CLI 自行退出的历史不会自动删除。终端快照仍由 tmux 提供，不写入消息库。
-
-## 目录
-
-```text
-server/main.py       REST API、鉴权与 WebSocket 转发
-packages/agent/      默认 Node.js 客户端、npm 包、独立 curl 安装脚本
-agent/main.py        兼容 Python 客户端、白名单、tmux 管理
-web/index.html       手机可用的简易控制页
-web/app.js           轮询、独立消息区、交互卡片与按键
-agent/interactions.py 当前终端提示识别
-agent/state.py       本地消息记录与请求去重
-config/agent.yaml    无密钥的项目配置模板
-deploy/             Linux systemd 示例
-.env.example         环境变量模板
-Caddyfile.example    HTTPS/WSS 反向代理示例
-tests/               鉴权、转发与会话测试
-```
-
-## Node 客户端本地运行
-
-常规安装直接使用 [README 的 curl 指令](../README.md)。源码开发需要 Node.js 22.13+、npm 和 tmux 3.2+：
+需要 Python 3.9+、Node.js 22.13+、tmux 3.2+，以及已安装并登录的 Codex / Claude。
 
 ```bash
-npm ci --prefix packages/agent --ignore-scripts
-node packages/agent/bin/pangolin-agent.js setup --relay http://127.0.0.1:8000 --project "/项目绝对路径" --no-start
-node packages/agent/bin/pangolin-agent.js run
-```
-
-`setup` 使用普通账号，提示输入服务端设备 Token；本机 Relay 可用 HTTP，远程 Relay 必须使用 HTTPS。服务端仍使用下方 Python 部署步骤。
-
-多个项目可在 `~/.local/share/pangolin/agent.json` 中配置 `projects`（无需向 Relay 公开本地路径）：
-
-```json
-{"projects":{"frontend":{"path":"/绝对路径/frontend","agents":["codex","claude"]},"backend":{"path":"/绝对路径/backend","agents":["codex"]}}}
-```
-
-将该字段合并到已有配置，保留连接凭据；重启 Agent 后生效。`tmux_socket` 默认 `pangolin`，`state_path` 可指定已有 SQLite 数据库。Node 和 Python 共用消息协议、数据库格式及服务名称。更多选项见 [Node 包文档](../packages/agent/README.md)。
-
-## Python 客户端与服务端手动运行
-
-需要 Python 3.9+、tmux 3.2+。在内网机器安装并登录 `codex` / `claude`，确认对应命令在 PATH 中可用。API key 只在内网机器配置，不传给 Relay。
-
-```bash
-cd /path/to/Pangolin
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/pip install -r requirements-lock.txt
+npm ci --prefix packages/agent --ignore-scripts
 cp .env.example .env
-cp config/agent.yaml config/agent.local.yaml
 chmod 600 .env
 ```
 
-编辑 `config/agent.local.yaml`，把 `example.path` 改为已有项目的绝对路径。
-运行下列命令两次，分别生成 USER_TOKEN 和 DEVICE_TOKEN：
-
-```bash
-python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
-```
-
-将值填入本地 `.env`。`DEVICE_TOKENS=devbox:<设备token>` 与 `DEVICE_TOKEN=<设备token>` 的设备 token 要一致，用户 token 必须不同。多个设备用逗号分隔，每台使用独立 token。模板占位符无法启动服务。
-
-终端一启动 Relay（必须单 worker）：
+终端一启动服务端（单 worker），开发时仅监听 loopback：
 
 ```bash
 source .venv/bin/activate
@@ -97,75 +22,126 @@ set -a; source .env; set +a
 uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1 --ws-max-size 131072
 ```
 
-终端二启动 Agent：
+打开 http://127.0.0.1:8000 注册账号。终端二以普通账号配置客户端：
 
 ```bash
-source .venv/bin/activate
-set -a; source .env; set +a
-python -m agent.main
+node packages/agent/bin/pangolin-agent.js setup --server http://127.0.0.1:8000 \
+  --email "you@example.com" --project "/项目绝对路径" --no-start
+node packages/agent/bin/pangolin-agent.js run
 ```
 
-打开 http://127.0.0.1:8000，输入 USER_TOKEN，选设备，填写项目 `example`，创建会话。需要本机交互时：
+## 服务端配置
+
+| 环境变量 | 默认值 / 用途 |
+| --- | --- |
+| `PANGOLIN_AUTH_MODE` | `accounts`；`legacy` 单独启用旧 Token 模式，两种认证不能混用 |
+| `PANGOLIN_DATABASE` | `.pangolin/server.sqlite3`，进程必须可写所在目录 |
+| `PANGOLIN_PUBLIC_URL` | 浏览器使用的站点根地址，例如 `https://agent.example.com`，用于来源校验和 Secure Cookie |
+| `PANGOLIN_REGISTRATION` | `open` 允许注册；`closed` 仅本机命令创建账号 |
+| `PANGOLIN_HISTORY_DAYS` | `30`，已停止且超过期限的对话会删除，启动及每小时清理 |
+
+原生安装器从 `<安装目录>/server.json` 加载配置，其中对应字段是 `auth_mode`、`public_url`、`registration`、`history_days`。有 `ip` / `domain` 时自动生成 HTTPS 站点地址。修改后重启服务。
+
+服务端继续保持单进程，设备连接保存在内存；账号、设备凭据哈希、对话和同步进度在 SQLite WAL 中。数据库目录与程序目录分离。不要使用多个 Uvicorn worker 指向同一个设备连接池。
+
+公网接入 Caddy 或已有 HTTPS 代理，保留 Host 与协议头，并禁用 `/api/updates` 的响应缓存、缓冲。仅信任受控代理的转发头；原生安装监听 loopback。Docker 反向代理场景应明确设置 `PANGOLIN_PUBLIC_URL` 为外部 HTTPS 地址。无需开放内网机器入站端口。
+
+## 本机账号管理与备份
+
+源码运行时：
 
 ```bash
-tmux -L pangolin list-sessions
-tmux -L pangolin attach -t 'rp-替换为实际会话ID'
+.venv/bin/python -m server.admin create-user --email "you@example.com"
+.venv/bin/python -m server.admin reset-password --email "you@example.com"
+.venv/bin/python -m server.admin import-device --email "you@example.com" --device devbox
+.venv/bin/python -m server.admin backup --output /私有备份目录/server.sqlite3
 ```
 
-上面 attach 目标应直接替换为列表输出的完整 `rp-...` ID；退出查看但保留会话用 `Ctrl-B D`。停止网页上的会话会终止 CLI 及其正在运行的任务。
+使用 `--database` 指定已运行服务端的同一个数据库。原生安装推荐使用 `<安装目录>/pangolin`，它自动选择数据库和对应运行用户。Docker 用 `docker compose --env-file .pangolin/compose.env exec relay python -m server.admin ...`，备份目标应在 `/data`，再通过容器复制到受控备份目录。
 
-## 公网部署
+创建、重置时密码从终端隐藏读取，也可传 `--password-file /私有文件`，不用明文命令行参数。密码重置撤销全部浏览器和设备登录。没有“首个用户是管理员”的规则，也没有远程管理员读取所有对话的接口。
 
-1. 在 VPS 安装 Python 依赖，Relay 仅监听 `127.0.0.1:8000`，只设置 USER_TOKEN 与 DEVICE_TOKENS。
-2. 将 Caddyfile.example 中域名改为自己的域名，DNS 指向 VPS；允许入站 443，自动证书签发按 Caddy 配置开放 80。
-3. 内网 Agent 设置 `RELAY_WS_URL=wss://你的域名/ws/agent`、DEVICE_ID、DEVICE_TOKEN、AGENT_CONFIG。非 loopback 地址强制 WSS。
-4. 浏览器访问 `https://你的域名`。不要把 token 放在 URL、截图或版本库里。
+`backup` 使用 SQLite backup API，包含已提交的 WAL 内容。不要在运行中仅复制主数据库文件，也不要把备份放入网页静态目录。升级前原生安装器自动备份服务端数据库；客户端首次导入旧历史前会备份本机库。Docker 使用持久化 `pangolin-data` 卷，升级前需自行执行备份命令。
 
-Linux 示例在 `deploy/`。服务端需先创建专用 `pangolin` 用户，把项目放到 `/opt/Pangolin` 并安装虚拟环境，在 `/etc/pangolin/server.env` 写入两项服务端变量，限制权限为 600。将 server unit 安装到 `/etc/systemd/system/` 后执行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now pangolin-server`。
+恢复时先停止服务端和客户端，保留现有文件副本，恢复到同一路径并保持运行用户和权限（目录 700、文件 600），清理旧 WAL/SHM 后再启动。服务端与客户端的同步进度需要一致；只把一端回滚到旧快照可能触发“同步序号不连续”，此时保持原库副本，恢复匹配的数据库备份，不要手动修改同步序号。删除操作不追溯清除已有备份。
 
-Agent 示例是 user unit：项目位于 `~/Pangolin`，环境文件位于 `~/.config/pangolin/agent.env`（权限 600），unit 放入 `~/.config/systemd/user/`。按 CLI 实际安装位置修改 unit 的 PATH，然后运行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now pangolin-agent`。需要退出登录后运行时由管理员配置 linger。macOS 本地运行无需 systemd。
+## 客户端配置
 
-模型认证仅在 Agent 用户环境配置；不要复制包含服务端 USER_TOKEN 的环境文件到其他设备。tmux server 会继承首次启动时的环境，变更模型凭据后需在维护时停止会话并重新启动专用 tmux server。
+配置位于 `~/.local/share/pangolin/agent.json`，`--prefix` 可以修改位置。配置包含服务端地址、账号 ID、邮箱、设备 ID 和设备凭据；不保存账号密码。模型 API key 只保存在内网配置中，不上传服务端。
 
-## API 示例
+多个项目可将以下 `projects` 字段合并到已有配置，保留连接凭据，再重启客户端：
 
-令牌已从私有环境文件加载时：
+```json
+{"projects":{"frontend":{"path":"/绝对路径/frontend","agents":["codex","claude"]},"backend":{"path":"/绝对路径/backend","agents":["codex"]}}}
+```
+
+只向服务端上传项目名和允许使用的 CLI，不上传项目路径。`state_path` 可指定本地 SQLite 位置，绑定后不要改为另一个空库。新设备的 `tmux_socket` 默认 `pangolin-<设备ID>`；迁移设备保留原 socket。
+
+本机查看 CLI：
 
 ```bash
-curl -H "Authorization: Bearer $USER_TOKEN" http://127.0.0.1:8000/api/machines
-curl -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"project":"example","agent":"codex"}' \
-  http://127.0.0.1:8000/api/machines/devbox/sessions
+tmux -L '替换为配置中的tmux_socket' list-sessions
+tmux -L '替换为配置中的tmux_socket' attach -t 'rp-替换为完整会话ID'
 ```
 
-设备项目列表：GET `/api/machines/{device}/projects`，返回项目名和允许的 Agent，不返回本地路径。
+用 `Ctrl-B D` 退出查看并保留会话。不要让多个 Agent 进程同时管理相同数据库和 tmux socket。模型认证改变后，已有 tmux server 不会自动更新环境，需在适合停止任务时重新启动专用 server。
 
-其余操作基于 `/api/machines/{device}/sessions`，均需浏览器 Token：
+## 账号接口
+
+浏览器通过 Cookie 鉴权。登录状态为 30 天；Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下加 Secure。变更操作需要 `X-CSRF-Token`，来自登录/注册响应或 `/api/auth/me`。密码使用 Argon2id 哈希，登录和注册有频率限制，校验错误不会回显输入密码。
 
 | 请求 | 用途 |
 | --- | --- |
-| GET / POST | 列出 / 创建会话；创建 body 为 `{"project":"example","agent":"codex"}` |
-| POST `/{session}/send` | 发送 `{"message":"任务","request_id":"32位小写十六进制ID"}` |
-| GET `/{session}/state?after=0` | 读取用户/交互事件、终端快照、`screen_id` 和可识别选项 |
-| POST `/{session}/input` | 发送选项或有限按键，见下方示例 |
-| GET `/{session}/logs` | 兼容旧客户端的终端快照接口 |
-| DELETE `/{session}` | 停止会话并清除本地消息记录 |
+| GET `/api/auth/config` | 当前认证方式、注册开关、历史保留期限 |
+| POST `/api/auth/register` | `{"email":"you@example.com","password":"12–128位密码"}`，成功后登录 |
+| POST `/api/auth/login` | 同上，返回 `user` 和 `csrf`，并设置 Cookie |
+| GET `/api/auth/me` | 当前账号、未验证邮箱状态和 CSRF |
+| POST `/api/auth/logout` | 撤销当前浏览器登录 |
+| POST `/api/auth/password` | `current_password`、`new_password`，撤销所有浏览器与设备登录 |
+| POST `/api/auth/device-login` | `email`、`password`、`name`，自动分配设备 ID；重新登录可带原 `device_id` 和 `expected_account` |
+| POST `/api/agent/refresh` | 设备凭据续期，需要设备 Authorization 与 X-Device-ID |
+| DELETE `/api/agent/binding` | 内网客户端退出设备登录 |
+| DELETE `/api/machines/{device}/binding` | 浏览器撤销自己设备的登录 |
+| GET `/api/updates` | SSE 账号变更通知，事件 `change` / `logout`，客户端据此重新读取数据 |
 
-`state.events` 按事件 ID 升序返回，每次最多 100 条并限制报文大小；下次把 `state.cursor` 作为 `after`，直到没有新事件。`source` 为 `user` 或 `interaction`，`status` 为 `sent`、`pending` 或 `uncertain`；终端独立在 `terminal.text`，最多保留最近 8000 字符。`interaction` 为空表示没有识别到菜单，不代表无需用户操作。
+设备凭据仅允许连接该设备和续期、退出，不授予网页账号权限。凭据有效期 90 天，在线客户端在连接时及每天续期。长期离线过期后重新登录。所有资源访问按服务端记录的账号归属校验，客户端提交账号 ID 不能改变归属。
+
+## 会话接口
+
+GET `/api/machines` 返回自己的设备，GET `/api/machines/{device}/projects` 返回项目白名单。以下基于 `/api/machines/{device}/sessions`：
+
+| 请求 | 用途 |
+| --- | --- |
+| GET / POST | 已同步会话列表 / 创建；body 为 `{"project":"example","agent":"codex"}` |
+| POST `/{session}/send` | `{"message":"任务","request_id":"32位小写十六进制ID"}` |
+| GET `/{session}/state?after=0` | 消息、状态、终端快照、实时审批信息 |
+| POST `/{session}/input` | 选择或有限终端按键 |
+| POST `/{session}/stop` | 结束 CLI，保留历史 |
+| GET `/{session}/logs` | 终端快照兼容接口 |
+| DELETE `/{session}` | 删除历史并结束 CLI；设备离线时延迟清除本机数据 |
+
+账号模式的 `cursor` 是服务端变更游标，不能当作事件 ID。消息状态从 pending 变成 sent/uncertain 时，相同事件 ID 会再次返回；界面需按 ID 更新，而非追加重复消息。每次最多 100 条并限制报文大小，`has_more` 为真时继续传回 `cursor`。
+
+`source` 为 `user` 或 `interaction`。终端在 `terminal.text`，最多 8000 字符。`live=false` 表示仅能查看历史，此时 `screen_id` 和 `interaction` 为空；在线时现查 Agent 的终端以处理审批。快照不构成完整滚动日志。
+
+交互 body：
 
 ```json
-{"screen_id":"从最近一次 state 原样取得的64位摘要","choice":"2","request_id":"32位小写十六进制ID"}
+{"screen_id":"最近state返回的64位摘要","choice":"2","request_id":"32位小写十六进制ID"}
 ```
 
-或者将 `choice` 替换为 `key`，只允许 `Up/Down/Left/Right/Enter/Escape/Tab/Space/BSpace/C-c`。两者只能提供一个，选项 ID 必须来自当前 `interaction.options`。终端已变化时返回 409，刷新并核对后再操作。`send` 和 `input` 都支持请求去重，重试应复用相同 `request_id` 与 body；未提供 ID 时由服务端生成。操作是否送达无法确认时保留待核对记录，不自动重新发送。
+或将 `choice` 替换为 `key`，仅允许 `Up/Down/Left/Right/Enter/Escape/Tab/Space/BSpace/C-c`。两者只能提供一个。过期画面返回 409；同一审批被其他页面处理后也会拒绝重复操作。发送和交互重试必须复用相同请求 ID 与内容；不确定是否执行时不能自动重发。
 
-## 验证
+## 同步协议
 
-```bash
-pip install -r requirements-lock.txt
-python -m pytest -q
-```
+Agent 的 WebSocket 使用 `Authorization: Bearer <设备凭据>` 与 `X-Device-ID`。RPC 继续使用 `id/action` 请求及 `id/ok/result` 响应。同步使用独立 `type=sync` 帧，携带持久化 `stream`、递增 `seq` 的事件；服务端事务提交后返回 `sync.ack` 的已接收游标。
 
-`.gitignore` 排除 `.env`、本地 YAML、私钥、日志、虚拟环境。仅提交示例配置。Relay 内存中会接触 prompt 与终端输出，部署在可信服务器并保护该服务器的访问权限。
+本地 SQLite 触发器将新消息和状态变化与原记录原子写入 outbox。服务端按设备/stream/序号去重，消息按设备/会话/事件 ID 更新。ACK 丢失时重传同一批次；未 ACK 的事件不删除。进程中断留下的 pending 操作转为 uncertain，不自动再次执行终端输入。
 
-`requirements-lock.txt` 记录本次 Python 3.9 验证的完整依赖（含测试依赖）；GitHub Actions 使用该文件复现测试。
+删除生成服务端 tombstone，后续旧事件被忽略；ACK 同时下发待清除会话。Agent 清理本机数据并回传 deleted，保持序号连续。停止保留本地消息和最终快照。同步数据只覆盖本工具管理的会话。
+
+## 旧 Token 模式
+
+显式设置 `PANGOLIN_AUTH_MODE=legacy`、`USER_TOKEN` 和 `DEVICE_TOKENS` 后，浏览器显示旧 Token 入口。两类 Token 必须不同且至少 32 位。Node 客户端可用 `setup --token-file`；Python 客户端仍可按 `config/agent.yaml` 和 `deploy/pangolin-agent.service` 运行。
+
+旧模式不使用账号数据库或离线历史接口，停止会话仍清除本地记录。旧模式 API 使用 Authorization Bearer；账号模式不接受旧共享 Token。迁移步骤见 README，旧设备的归属只能通过服务端本机 `import-device` 设置，不能被注册用户自行领取。

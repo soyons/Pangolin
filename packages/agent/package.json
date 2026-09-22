@@ -1,6 +1,6 @@
 {
   "name": "@soyons/pangolin-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pangolin outbound agent for remote Codex and Claude terminal sessions",
   "type": "module",
   "bin": { "pangolin-agent": "bin/pangolin-agent.js" },

@@ -116,6 +116,18 @@ test('stale approvals are rejected and successful retries cannot press twice', a
   assert.equal(sessions.store.events(SID)[0].source, 'interaction');
 });
 
+test('two browsers cannot approve the same unchanged prompt using different request IDs', async t => {
+  const sessions = stubSessions(t);
+  const input = { action: 'session.input', session: SID, choice: '1', screen_id: screenId(MENU) };
+  const results = await Promise.allSettled([
+    sessions.handle({ ...input, request_id: id() }), sessions.handle({ ...input, request_id: id() })
+  ]);
+  assert.equal(results[0].status, 'fulfilled');
+  assert.equal(results[1].status, 'rejected');
+  assert.match(results[1].reason.message, /已处理/);
+  assert.equal(sessions.calls.filter(call => call[0] === 'send-keys').length, 1);
+});
+
 test('untrusted commands, keys, and terminal escapes cannot reach tmux input', async t => {
   const sessions = stubSessions(t);
   for (const msg of [
@@ -215,4 +227,76 @@ test('WebSocket authenticates, rejects malformed commands, reconnects, and stops
   assert.equal(connections, 2);
   assert.ok(logs.some(line => line.includes('Connected')));
   assert.ok(!logs.join('\n').includes('t'.repeat(40)));
+});
+
+test('account login scopes the device and never stores the password', async t => {
+  const dir = temporary(t), bins = join(dir, 'bin'); mkdirSync(bins);
+  for (const name of ['codex', 'tmux']) writeFileSync(join(bins, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const password = ' password with significant spaces ', file = join(dir, 'password'); writeFileSync(file, password + '\n');
+  const requests = [], account = 'd'.repeat(32), device = 'dev-' + id();
+  const fetcher = async (url, options) => {
+    requests.push({ url: String(url), options });
+    assert.equal(options.redirect, 'error');
+    assert.equal(JSON.parse(options.body).password, password);
+    return { ok: true, json: async () => ({ user: { id: account, email: 'me@example.com' }, device, device_token: 't'.repeat(40) }) };
+  };
+  const config = await configure({ server: 'https://example.com', email: 'Me@Example.com', project: dir, 'password-file': file }, {}, { env: { PATH: bins }, fetcher });
+  assert.equal(config.account_id, account); assert.equal(config.email, 'me@example.com');
+  assert.equal(config.device, device); assert.equal(config.tmux_socket, 'pangolin-' + device);
+  assert.ok(!JSON.stringify(config).includes(password));
+  assert.equal(requests[0].url, 'https://example.com/api/auth/device-login');
+  assert.equal(JSON.parse(requests[0].options.body).device_id, undefined);
+  await configure({ login: true, 'password-file': file }, config, { env: { PATH: bins }, fetcher });
+  assert.equal(JSON.parse(requests[1].options.body).expected_account, account);
+  assert.equal(JSON.parse(requests[1].options.body).device_id, device);
+  await assert.rejects(configure({ server: 'https://elsewhere.test' }, config, { env: { PATH: bins }, fetcher }), /其他服务端/);
+});
+
+test('outbox survives restart, updates statuses, and rejects acknowledgements beyond sent records', t => {
+  const path = join(temporary(t), 'sync.sqlite3'), binding = { server: 'wss://example.com', account: 'd'.repeat(32), device: 'dev-test' };
+  const first = new SessionStore(path);
+  first.enableSync(binding); first.create(SID, 'example', 'claude');
+  first.begin(SID, id(), '{}', 'user', 'pending message');
+  const before = first.batch(); assert.equal(before.entries.length, 2);
+  first.close();
+  const second = new SessionStore(path); t.after(() => second.close()); second.enableSync(binding);
+  const after = second.batch(); assert.equal(after.stream, before.stream);
+  assert.equal(after.entries.at(-1).payload.status, 'uncertain');
+  assert.throws(() => second.ack(999, after.entries.at(-1).seq));
+  assert.equal(second.batch().entries.length, 3);
+  second.ack(2, after.entries.at(-1).seq);
+  assert.equal(second.batch().entries.length, 1);
+  assert.equal(second.batch().entries[0].seq, 3);
+});
+
+test('deletion removes queued content without creating sequence gaps or permitting account reassignment', t => {
+  const store = new SessionStore(); t.after(() => store.close());
+  const binding = { server: 'wss://example.com', account: 'd'.repeat(32), device: 'dev-test' };
+  store.enableSync(binding); store.create(SID, 'example', 'codex');
+  const request = id(); store.begin(SID, request, '{}', 'user', 'private message'); store.finish(SID, request, { sent: true });
+  store.forget(SID);
+  const batch = store.batch();
+  assert.deepEqual(batch.entries.map(entry => entry.seq), [1, 2, 3, 4]);
+  assert.ok(batch.entries.every(entry => entry.kind === 'deleted'));
+  assert.ok(!JSON.stringify(batch).includes('private message'));
+  assert.deepEqual(store.all(), []);
+  assert.throws(() => store.enableSync({ ...binding, account: 'e'.repeat(32) }), /其他账号/);
+});
+
+test('legacy history needs explicit upload consent and account stop preserves messages', async t => {
+  const dir = temporary(t), path = join(dir, 'state.sqlite3');
+  const old = new SessionStore(path); old.create(SID, 'example', 'codex'); old.close();
+  const config = { state_path: path, relay: 'wss://example.com/ws/agent', account_id: 'd'.repeat(32), device: 'dev-test' };
+  const check = new SessionStore(path);
+  assert.throws(() => check.enableSync({ server: 'wss://example.com', account: config.account_id, device: config.device }), /旧会话/);
+  check.close();
+  const sessions = new Sessions({ ...config, sync_existing: true }); t.after(() => sessions.store.close());
+  sessions.tmux = async (...args) => ({ code: 0, stdout: args[0] === 'capture-pane' ? MENU : '' });
+  await sessions.handle({ action: 'session.send', session: SID, message: 'kept after stop' });
+  await sessions.handle({ action: 'session.stop', session: SID });
+  assert.equal(sessions.store.metadata(SID).status, 'stopped');
+  assert.equal(sessions.store.events(SID)[0].text, 'kept after stop');
+  assert.ok(sessions.store.snapshot(SID).text.includes('proceed'));
+  await sessions.handle({ action: 'session.delete', session: SID });
+  assert.deepEqual(sessions.store.events(SID), []);
 });

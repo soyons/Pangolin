@@ -71,6 +71,9 @@ def configure(args, existing):
     config['role'] = args.role
     config['path'] = os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')
     if args.role == 'server':
+        config['auth_mode'] = getattr(args, 'auth_mode', None) or config.get('auth_mode') or ('legacy' if existing else 'accounts')
+        config['registration'] = getattr(args, 'registration', None) or config.get('registration', 'open')
+        config['history_days'] = getattr(args, 'history_days', None) or config.get('history_days', 30)
         if args.device and existing and args.device != existing['device']:
             raise ValueError('Device ID already configured; refusing to silently change paired device')
         config.setdefault('device', args.device or 'devbox')
@@ -210,12 +213,19 @@ def main():
     p.add_argument('--project', help='Local project directory; agent only')
     p.add_argument('--token-file', help='Read device token from a private file instead of a hidden prompt')
     p.add_argument('--port', type=int)
+    p.add_argument('--auth-mode', choices=['accounts', 'legacy'], help='New installs default to accounts; existing Token installs stay legacy until explicitly migrated')
+    p.add_argument('--registration', choices=['open', 'closed'])
+    p.add_argument('--history-days', type=int)
     p.add_argument('--no-start', action='store_true', help='Install only; do not register services or change Caddy')
     args = p.parse_args()
     if args.ip and args.domain:
         p.error('Use either --ip or --domain')
     if args.port is not None and not 1024 <= args.port <= 65535:
         p.error('--port must be 1024–65535')
+    if args.history_days is not None and not 1 <= args.history_days <= 3650:
+        p.error('--history-days must be 1–3650')
+    if args.role == 'agent' and (args.auth_mode or args.registration or args.history_days):
+        p.error('--auth-mode/--registration/--history-days belong to server')
     if args.role == 'agent' and (args.domain or args.ip or args.port):
         p.error('--domain/--ip/--port belong to server')
     if args.role == 'server' and (args.relay or args.project or args.token_file):
@@ -233,6 +243,12 @@ def main():
     config_path = prefix / (args.role + '.json')
     existing = json.loads(config_path.read_text()) if config_path.exists() else {}
     config = configure(args, existing)
+    # SQLite's backup API includes committed WAL contents; do not copy a live database file.
+    database = prefix / 'state/server.sqlite3'
+    if args.role == 'server' and database.exists():
+        import sqlite3
+        with sqlite3.connect(database) as original, sqlite3.connect(str(database) + '.backup-' + str(time.time_ns())) as backup:
+            original.backup(backup)
     if config.get('ip') and not args.no_start:
         if not sys.platform.startswith('linux') or not shutil.which('apt-get') or sys.version_info < (3, 10):
             raise ValueError('IP HTTPS supports Ubuntu 22.04+ / Debian 12+ with Python 3.10+')
@@ -242,7 +258,9 @@ def main():
         raise ValueError('Install prefix must be separate from the source checkout')
     python = prefix / 'venv/bin/python'
     if not python.exists():
-        run(sys.executable, '-m', 'venv', prefix / 'venv')
+        # A root-owned conda/pyenv interpreter may live under /root, which the service user cannot traverse.
+        interpreter = '/usr/bin/python3' if os.geteuid() == 0 and sys.platform.startswith('linux') and Path('/usr/bin/python3').exists() else sys.executable
+        run(interpreter, '-m', 'venv', prefix / 'venv')
     run(python, '-m', 'pip', 'install', '-r', source / 'requirements.txt')
     for name in ('server', 'agent', 'web', 'scripts'):
         shutil.copytree(source / name, app / name, dirs_exist_ok=True,
@@ -252,6 +270,8 @@ def main():
     private_write(launcher, '#!/bin/sh\nexec ' + ' '.join(shlex.quote(str(x)) for x in
                   (python, app / 'scripts/manage.py', '--prefix', prefix)) + ' "$@"\n')
     launcher.chmod(0o700)
+    if args.role == 'server':
+        (prefix / 'state').mkdir(exist_ok=True, mode=0o700)
     if not args.no_start:
         if os.geteuid() == 0 and sys.platform.startswith('linux'):
             try:
@@ -262,6 +282,13 @@ def main():
             if account.pw_uid == 0:
                 raise ValueError('Refusing to use a privileged pangolin service account')
             for directory, dirs, files in os.walk(prefix):
+                if Path(directory) == prefix / 'state':
+                    # Application files stay root-owned; only the durable data directory is writable by the service.
+                    for item in [Path(directory), *(Path(directory) / n for n in dirs + files)]:
+                        os.chown(item, account.pw_uid, account.pw_gid, follow_symlinks=False)
+                        if not item.is_symlink():
+                            item.chmod(0o700 if item.is_dir() else 0o600)
+                    continue
                 for item in [Path(directory), *(Path(directory) / n for n in dirs + files)]:
                     os.chown(item, 0, account.pw_gid, follow_symlinks=False)
                     if not item.is_symlink():
@@ -290,7 +317,12 @@ def main():
         ip_host = ('[' + config['ip'] + ']' if ':' in config.get('ip', '') else config.get('ip'))
         site = 'https://' + (config.get('domain') or ip_host) if config.get('domain') or ip_host else f'http://127.0.0.1:{config["port"]}'
         print(('配置的访问地址（尚未启用 HTTPS）：' if args.no_start else '访问地址：') + site)
-        print('查看浏览器 Token / 设备 Token：' + shlex.quote(str(launcher)) + ' credentials')
+        if config['auth_mode'] == 'accounts':
+            print('账号模式：浏览器使用邮箱密码注册登录，无需配置邮件服务。')
+            print('本机创建账号：' + shlex.quote(str(launcher)) + ' create-user --email 你的邮箱')
+        else:
+            print('旧 Token 模式保持不变。迁移到账号模式请参考 README。')
+            print('查看浏览器 Token / 设备 Token：' + shlex.quote(str(launcher)) + ' credentials')
         if not config.get('domain') and not config.get('ip'):
             print('当前只监听本机；公网使用需加 --ip、--domain 或接入已有 HTTPS 反向代理。')
     else:

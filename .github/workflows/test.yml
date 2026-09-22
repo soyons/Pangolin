@@ -24,3 +24,6 @@ jobs:
         working-directory: packages/agent
       - run: node --check web/app.js
       - run: python -m pytest -q
+      - run: pip install playwright==1.55.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/account_smoke.py
